@@ -19,6 +19,7 @@ Optional env vars:
 """
 
 import csv
+import configparser
 import io
 import os
 import re
@@ -38,10 +39,10 @@ You are helping a software developer log time entries to Ruddr.
 
 1. Use `git log` and `git diff --stat` (via bash) to understand recent work on the
    current branch — commits, files changed, rough split between frontend/backend/docs.
-2. Call `get_git_context` to get the repo URL, current branch, and open PR URL.
-   You will use this URL in the notes field of every time entry.
-3. Call `list_projects` to find the matching project. Match on client name, project
-   name, or the current git repo name.
+2. Call `get_git_context` to get the repo URL, current branch, open PR URL, and any
+   `.ruddr-project` hint. You will use this URL in the notes field of every time entry.
+3. Call `list_projects` to find the matching project. If `get_git_context` returned a
+   project_id hint from `.ruddr-project`, use that directly and skip the search.
 4. Call `list_project_roles` for that project to see available roles. Infer the best
    role from the work:
    - Mostly changes under `assets/` or `frontend/` → Frontend / Frontend Developer
@@ -54,6 +55,7 @@ You are helping a software developer log time entries to Ruddr.
    task, and a concise notes string summarising the commits.
    **Notes MUST include a URL** — prefer PR URL, then branch URL, then repo URL.
    Format: "Brief description of work — <url>"
+   **Always round duration to the nearest 15 minutes** before presenting the draft.
 7. **Always present the full draft to the user for approval before calling
    `create_time_entry`.** Show every field clearly. Let the user edit anything.
 8. Only call `create_time_entry` after the user explicitly confirms.
@@ -101,6 +103,11 @@ def _paginate(endpoint: str, params: dict | None = None) -> list:
 def _fmt_minutes(minutes: int) -> str:
     h, m = divmod(minutes, 60)
     return f"{h}h {m:02d}m" if h else f"{m}m"
+
+
+def _round_to_15(minutes: int) -> int:
+    """Round a duration to the nearest 15-minute increment."""
+    return round(minutes / 15) * 15
 
 
 def _parse_duration(value: str) -> int:
@@ -212,10 +219,12 @@ def _resolve_task(name_or_id: str, tasks: list) -> dict:
 @mcp.tool()
 def get_git_context(repo_path: str = ".") -> str:
     """
-    Return the current git repo URL, branch, and open PR URL (if available).
+    Return the current git repo URL, branch, open PR URL, and any .ruddr-project hint.
 
-    Always call this before drafting a time entry so the notes can include a URL.
-    Priority: PR URL > branch URL > repo URL.
+    Always call this before drafting a time entry. It provides:
+      - The best URL to include in notes (PR URL > branch URL > repo URL)
+      - A project_id/project_name hint if a .ruddr-project file exists in the repo root
+        (use the hint directly instead of calling list_projects)
 
     Args:
         repo_path: Path to the git repo (defaults to current directory)
@@ -250,6 +259,23 @@ def get_git_context(repo_path: str = ".") -> str:
 
     best = pr_url or (f"{repo_url}/tree/{branch}" if branch else repo_url)
     lines.append(f"\nBest URL for notes: {best}")
+
+    # Check for .ruddr-project hint file
+    import pathlib
+    hint_path = pathlib.Path(repo_path) / ".ruddr-project"
+    if hint_path.exists():
+        cfg = configparser.RawConfigParser()
+        cfg.read_string("[project]\n" + hint_path.read_text())
+        project_id = cfg.get("project", "project_id", fallback="")
+        project_name = cfg.get("project", "project_name", fallback="")
+        if project_id or project_name:
+            lines.append("\n.ruddr-project hint found:")
+            if project_id:
+                lines.append(f"  project_id:   {project_id}")
+            if project_name:
+                lines.append(f"  project_name: {project_name}")
+            lines.append("  Use this project directly — no need to call list_projects.")
+
     return "\n".join(lines)
 
 
@@ -415,19 +441,20 @@ def create_time_entry(
         member_id: UUID of the member (from get_my_member_id)
         project_id: UUID of the project (from list_projects)
         date: Date in YYYY-MM-DD format
-        minutes: Duration in minutes (e.g. 90 = 1h 30m)
+        minutes: Duration in minutes — will be rounded to the nearest 15-minute increment
         notes: Description of work done. MUST include a URL — use get_git_context to
                find the best one (PR URL > branch URL > repo URL).
                Format: "Brief description — <url>"
         role_id: UUID of the project role (from list_project_roles) — required by most projects
         task_id: UUID of the project task (from list_project_tasks) — include when matched
     """
+    rounded = _round_to_15(minutes)
     payload: dict = {
         "typeId": "project_time",
         "memberId": member_id,
         "projectId": project_id,
         "date": date,
-        "minutes": minutes,
+        "minutes": rounded,
         "notes": notes,
         "statusId": "not_submitted",
     }
@@ -442,11 +469,12 @@ def create_time_entry(
 
     proj = (entry.get("project") or {}).get("name", "Unknown")
     duration = _fmt_minutes(entry.get("minutes", 0))
+    rounded_note = f" (rounded from {_fmt_minutes(minutes)})" if rounded != minutes else ""
 
     return (
         f"Time entry created successfully.\n"
         f"  Date:     {entry['date']}\n"
-        f"  Duration: {duration}\n"
+        f"  Duration: {duration}{rounded_note}\n"
         f"  Project:  {proj}\n"
         f"  ID:       {entry['id']}\n"
         f"  Status:   {entry.get('statusId', '—')}"
@@ -514,7 +542,7 @@ def bulk_import_time_entries(
 
     for i, row in enumerate(rows, start=2):  # row 1 = header
         try:
-            minutes = _parse_duration(row["minutes"])
+            minutes = _round_to_15(_parse_duration(row["minutes"]))
             project = _resolve_project(row["project"], active_projects)
             project_id = project["id"]
 
