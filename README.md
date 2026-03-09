@@ -136,6 +136,20 @@ Claude will:
 - Propose a complete entry (date, duration, project, role, task, notes)
 - Ask you to confirm or edit before submitting
 
+### Editing existing entries
+
+You can update any field on an existing time entry — duration, notes, date, role, or task.
+
+```
+Increase the duration on my last entry to 45 minutes.
+```
+
+```
+Fix the notes on yesterday's NRC entry — it should reference PR #88.
+```
+
+Claude will look up the entry, show you the proposed change, and only update it after you confirm.
+
 ### Notes and URLs
 
 Claude includes a URL in notes whenever one makes sense. For code work, `get_git_context`
@@ -227,6 +241,7 @@ When the file is present, Claude skips `list_projects` and uses the hint directl
 | `list_project_tasks` | Lists tasks for a project, optionally filtered by name |
 | `list_recent_time_entries` | Shows what you've logged recently (good for avoiding duplicates) |
 | `create_time_entry` | Submits a single time entry — **always asks for confirmation first** |
+| `update_time_entry` | Updates fields on an existing entry (duration, notes, date, role, task) — **always asks for confirmation first** |
 | `bulk_import_time_entries` | Parses a CSV, previews a table, then submits all entries |
 
 ## Role inference

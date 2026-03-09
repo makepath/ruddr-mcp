@@ -61,6 +61,12 @@ You are helping a software developer log time entries to Ruddr.
    `create_time_entry`.** Show every field clearly. Let the user edit anything.
 8. Only call `create_time_entry` after the user explicitly confirms.
 
+## Workflow for updating a time entry
+
+1. Ask the user which entry to update (or call `list_recent_time_entries` to find it).
+2. Show the proposed changes clearly and ask for confirmation.
+3. Only call `update_time_entry` after the user explicitly confirms.
+
 ## Workflow for bulk importing time entries
 
 1. The user provides a CSV (pasted inline or as a file path).
@@ -479,6 +485,73 @@ def create_time_entry(
         f"  Duration: {duration}{rounded_note}\n"
         f"  Project:  {proj}\n"
         f"  ID:       {entry['id']}\n"
+        f"  Status:   {entry.get('statusId', '—')}"
+    )
+
+
+@mcp.tool()
+def update_time_entry(
+    entry_id: str,
+    minutes: int = 0,
+    notes: str = "",
+    date: str = "",
+    role_id: str = "",
+    task_id: str = "",
+) -> str:
+    """
+    Update an existing time entry in Ruddr.
+
+    Only the fields you provide will be changed. Fetch the entry ID from
+    list_recent_time_entries. Duration is rounded to the nearest 15-minute increment.
+
+    IMPORTANT: Present the proposed changes to the user and get confirmation before calling.
+
+    Args:
+        entry_id: UUID of the time entry to update
+        minutes:  New duration in minutes (0 = leave unchanged)
+        notes:    New notes text (empty string = leave unchanged)
+        date:     New date in YYYY-MM-DD format (empty = leave unchanged)
+        role_id:  New role UUID (empty = leave unchanged)
+        task_id:  New task UUID (empty = leave unchanged)
+    """
+    payload: dict = {}
+    if minutes:
+        payload["minutes"] = _round_to_15(minutes)
+    if notes:
+        payload["notes"] = notes
+    if date:
+        payload["date"] = date
+    if role_id:
+        payload["roleId"] = role_id
+    if task_id:
+        payload["taskId"] = task_id
+
+    if not payload:
+        return "Nothing to update — no fields provided."
+
+    resp = httpx.patch(
+        f"{BASE_URL}/time-entries/{entry_id}",
+        headers=_headers(),
+        json=payload,
+        timeout=15,
+    )
+    resp.raise_for_status()
+    entry = resp.json()
+
+    proj = (entry.get("project") or {}).get("name", "Unknown")
+    duration = _fmt_minutes(entry.get("minutes", 0))
+    rounded_note = (
+        f" (rounded from {_fmt_minutes(minutes)})"
+        if minutes and _round_to_15(minutes) != minutes
+        else ""
+    )
+
+    return (
+        f"Time entry updated successfully.\n"
+        f"  ID:       {entry['id']}\n"
+        f"  Date:     {entry['date']}\n"
+        f"  Duration: {duration}{rounded_note}\n"
+        f"  Project:  {proj}\n"
         f"  Status:   {entry.get('statusId', '—')}"
     )
 
