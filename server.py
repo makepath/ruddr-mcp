@@ -53,8 +53,9 @@ You are helping a software developer log time entries to Ruddr.
    or GitHub issue number in the commit messages.
 6. Draft a time entry with: date (today unless specified), duration, project, role,
    task, and a concise notes string summarising the commits.
-   **Notes MUST include a URL** — prefer PR URL, then branch URL, then repo URL.
-   Format: "Brief description of work — <url>"
+   Include a URL in notes when one is available (PR > branch > repo) — skip it
+   for non-code work like meetings, 1:1s, or admin tasks where no URL applies.
+   Format when URL present: "Brief description of work — <url>"
    **Always round duration to the nearest 15 minutes** before presenting the draft.
 7. **Always present the full draft to the user for approval before calling
    `create_time_entry`.** Show every field clearly. Let the user edit anything.
@@ -442,9 +443,10 @@ def create_time_entry(
         project_id: UUID of the project (from list_projects)
         date: Date in YYYY-MM-DD format
         minutes: Duration in minutes — will be rounded to the nearest 15-minute increment
-        notes: Description of work done. MUST include a URL — use get_git_context to
-               find the best one (PR URL > branch URL > repo URL).
-               Format: "Brief description — <url>"
+        notes: Description of work done. Include a URL when one is available — use
+               get_git_context to find the best one (PR URL > branch URL > repo URL).
+               For non-code work (meetings, 1:1s, admin) a URL is not required.
+               Format when URL present: "Brief description — <url>"
         role_id: UUID of the project role (from list_project_roles) — required by most projects
         task_id: UUID of the project task (from list_project_tasks) — include when matched
     """
