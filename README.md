@@ -131,21 +131,24 @@ Log yesterday's work — I was mostly fixing backend bugs related to the geoenri
 
 Claude will:
 - Check your recent git commits for context
-- Find the best URL to include in the notes (PR > branch > repo)
+- Include a URL in notes when one is available (PR > branch > repo); skips it for meetings/admin
 - Round the duration to the nearest 15 minutes
 - Propose a complete entry (date, duration, project, role, task, notes)
 - Ask you to confirm or edit before submitting
 
-### Notes always include a URL
+### Notes and URLs
 
-Every time entry Claude creates will include a link in the notes field. Claude calls
-`get_git_context` to find the best available URL in priority order:
+Claude includes a URL in notes whenever one makes sense. For code work, `get_git_context`
+finds the best available link in priority order:
 
 1. **Open PR URL** — if `gh` CLI is installed and there's an open PR on the current branch
 2. **Branch URL** — `https://github.com/org/repo/tree/your-branch`
 3. **Repo URL** — `https://github.com/org/repo`
 
-Example notes: `Fixed layout bug in BDR report — https://github.com/makepath/nrc/pull/142`
+Example: `Fixed layout bug in BDR report — https://github.com/makepath/nrc/pull/142`
+
+For non-code work — meetings, 1:1s, admin tasks — a URL isn't required and Claude won't
+invent one.
 
 ### Bulk import
 
