@@ -13,17 +13,23 @@ starts. No hosting required. Each developer runs it with their own Ruddr API key
 Claude's typical flow when you ask it to log time:
 
 1. Reads recent commits and `git diff --stat` on your current branch
-2. Calls `list_projects` to find the matching Ruddr project
-3. Infers the **role** from where the changes landed (frontend, backend, docs, etc.)
-4. Calls `list_project_tasks` and tries to match a task to the branch name or issue refs
-5. Drafts a complete time entry and presents it for your approval
-6. Submits only after you confirm
+2. Calls `get_git_context` to get the repo URL, current branch, and open PR URL
+3. Calls `list_projects` to find the matching Ruddr project
+4. Infers the **role** from where the changes landed (frontend, backend, docs, etc.)
+5. Calls `list_project_tasks` and tries to match a task to the branch name or issue refs
+6. Drafts a complete time entry — **notes always include a URL** (PR > branch > repo)
+7. Presents the draft for your approval
+8. Submits only after you confirm
 
 ## Prerequisites
 
-- [uv](https://docs.astral.sh/uv/getting-started/installation/) — used to run the server
-  with automatic dependency management (no virtualenv setup needed)
-- A Ruddr account with API access
+One of the following to run the server:
+
+- **[uv](https://docs.astral.sh/uv/getting-started/installation/)** — handles dependencies
+  automatically, no virtualenv setup needed (recommended)
+- **Python 3.10+** with `pip install "mcp[cli]>=1.0" httpx` — works if `uv` isn't available
+
+A Ruddr account with API access is also required.
 
 ## Setup
 
@@ -69,6 +75,33 @@ Add the server to `~/.claude/settings.json`:
 }
 ```
 
+If you're using `python3` directly instead of `uv`:
+
+```json
+{
+  "mcpServers": {
+    "ruddr": {
+      "command": "python3",
+      "args": ["/home/you/git/ruddr-mcp/server.py"],
+      "env": {
+        "RUDDR_API_KEY": "your-ruddr-api-key-here",
+        "RUDDR_MEMBER_ID": "your-member-uuid-here"
+      }
+    }
+  }
+}
+```
+
+Or register it via the CLI (user scope, available in all projects):
+
+```bash
+claude mcp add \
+  -e RUDDR_API_KEY=your-key \
+  -e RUDDR_MEMBER_ID=your-member-uuid \
+  --scope user \
+  ruddr -- python3 /home/you/git/ruddr-mcp/server.py
+```
+
 > **Note:** `RUDDR_MEMBER_ID` is optional but recommended — it saves a lookup on every
 > session. If omitted, ask Claude to run `get_my_member_id` once to find it.
 
@@ -97,8 +130,62 @@ Log yesterday's work — I was mostly fixing backend bugs related to the geoenri
 
 Claude will:
 - Check your recent git commits for context
+- Find the best URL to include in the notes (PR > branch > repo)
 - Propose a complete entry (date, duration, project, role, task, notes)
 - Ask you to confirm or edit before submitting
+
+### Notes always include a URL
+
+Every time entry Claude creates will include a link in the notes field. Claude calls
+`get_git_context` to find the best available URL in priority order:
+
+1. **Open PR URL** — if `gh` CLI is installed and there's an open PR on the current branch
+2. **Branch URL** — `https://github.com/org/repo/tree/your-branch`
+3. **Repo URL** — `https://github.com/org/repo`
+
+Example notes: `Fixed layout bug in BDR report — https://github.com/makepath/nrc/pull/142`
+
+### Bulk import
+
+You can import multiple time entries at once from a CSV. Paste the CSV directly into the
+chat or reference a file path.
+
+#### CSV format
+
+```csv
+date,minutes,project,role,task,notes
+2026-03-01,90,NRC Easement,Backend,BDR report fix,Fixed layout bug — https://github.com/org/repo/pull/42
+2026-03-02,60,Agency Ops,,,Team standup — https://github.com/org/repo
+2026-03-03,1h 30m,Battleship,Frontend,,Dashboard updates — https://github.com/org/repo/tree/feat/dashboard
+```
+
+Column reference:
+
+| Column | Required | Format |
+|--------|----------|--------|
+| `date` | yes | YYYY-MM-DD |
+| `minutes` | yes | Integer minutes (`90`), float hours (`1.5`), or `1h 30m` / `1:30` |
+| `project` | yes | Project name (partial match ok) or UUID |
+| `role` | no | Role name (partial match ok) or UUID |
+| `task` | no | Task name (partial match ok) or UUID |
+| `notes` | no | Free text; include a URL when possible |
+
+#### Bulk import workflow
+
+1. Paste the CSV and ask Claude to bulk import it
+2. Claude calls `bulk_import_time_entries` with `dry_run=True` and shows you a preview table
+3. Review the table — correct any errors in the CSV if needed
+4. Confirm, and Claude submits all entries
+
+Example prompt:
+
+```
+Bulk import these time entries:
+
+date,minutes,project,notes
+2026-03-01,90,NRC Easement,Fixed BDR report layout — https://github.com/makepath/nrc/pull/42
+2026-03-02,30,Agency Ops,Team standup — https://github.com/makepath/ruddr-mcp
+```
 
 ### Per-repo project hint (optional)
 
@@ -117,12 +204,14 @@ Mention it exists when prompting Claude: *"Use the .ruddr-project file to find t
 
 | Tool | What it does |
 |---|---|
+| `get_git_context` | Returns repo URL, current branch, and open PR URL for use in notes |
 | `get_my_member_id` | Returns your member ID (or lists all members if not configured) |
 | `list_projects` | Lists all active projects with IDs, clients, and required fields |
 | `list_project_roles` | Lists roles for a project (used to infer Frontend / Backend / etc.) |
 | `list_project_tasks` | Lists tasks for a project, optionally filtered by name |
 | `list_recent_time_entries` | Shows what you've logged recently (good for avoiding duplicates) |
-| `create_time_entry` | Submits a time entry — **always asks for confirmation first** |
+| `create_time_entry` | Submits a single time entry — **always asks for confirmation first** |
+| `bulk_import_time_entries` | Parses a CSV, previews a table, then submits all entries |
 
 ## Role inference
 
@@ -143,8 +232,9 @@ The actual role names come from your Ruddr project configuration, so they may di
 Check that `RUDDR_API_KEY` is present in the `env` block of your MCP config.
 
 **Server doesn't appear in `/mcp`**
-Make sure `uv` is on your PATH. Test with `which uv`. If installed via curl, it's usually
-at `~/.local/bin/uv` — use the full path in the `command` field if needed.
+If using `uv`, make sure it's on your PATH. Test with `which uv`. If installed via curl,
+it's usually at `~/.local/bin/uv` — use the full path in the `command` field if needed.
+Alternatively, switch to `python3` (see Setup above).
 
 **"No active projects found"**
 Your API key may belong to a user without access to projects. Confirm you can see projects
@@ -153,3 +243,11 @@ at `https://app.ruddr.io`.
 **Time entry fails with 422**
 The project may require a role or task. Claude should handle this automatically, but you
 can check by running `list_project_roles` and `list_project_tasks` manually in the chat.
+
+**Bulk import: "Ambiguous project" error**
+The project name matched more than one project. Use a more specific substring or paste the
+project UUID directly in the CSV.
+
+**PR URL not appearing in notes**
+`get_git_context` tries `gh pr view` to find the PR URL. Install the
+[GitHub CLI](https://cli.github.com/) and run `gh auth login` once to enable this.
