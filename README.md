@@ -13,11 +13,12 @@ starts. No hosting required. Each developer runs it with their own Ruddr API key
 Claude's typical flow when you ask it to log time:
 
 1. Reads recent commits and `git diff --stat` on your current branch
-2. Calls `get_git_context` to get the repo URL, current branch, and open PR URL
-3. Calls `list_projects` to find the matching Ruddr project
+2. Calls `get_git_context` to get the repo URL, branch, open PR URL, and any `.ruddr-project` hint
+3. Uses the `.ruddr-project` hint if present, otherwise calls `list_projects` to find the project
 4. Infers the **role** from where the changes landed (frontend, backend, docs, etc.)
 5. Calls `list_project_tasks` and tries to match a task to the branch name or issue refs
-6. Drafts a complete time entry — **notes always include a URL** (PR > branch > repo)
+6. Drafts a complete time entry — **notes always include a URL** (PR > branch > repo),
+   duration **rounded to the nearest 15 minutes**
 7. Presents the draft for your approval
 8. Submits only after you confirm
 
@@ -131,6 +132,7 @@ Log yesterday's work — I was mostly fixing backend bugs related to the geoenri
 Claude will:
 - Check your recent git commits for context
 - Find the best URL to include in the notes (PR > branch > repo)
+- Round the duration to the nearest 15 minutes
 - Propose a complete entry (date, duration, project, role, task, notes)
 - Ask you to confirm or edit before submitting
 
@@ -187,10 +189,21 @@ date,minutes,project,notes
 2026-03-02,30,Agency Ops,Team standup — https://github.com/makepath/ruddr-mcp
 ```
 
+### 15-minute rounding
+
+All durations are automatically rounded to the nearest 15-minute increment before
+submission — both for single entries and bulk imports. If rounding changes the value,
+the original duration is shown in the confirmation:
+
+```
+Duration: 1h 15m (rounded from 1h 11m)
+```
+
 ### Per-repo project hint (optional)
 
-You can drop a `.ruddr-project` file at the root of any repo to help Claude pick the
-right project without searching:
+Drop a `.ruddr-project` file at the root of any repo and Claude will automatically
+use it — no need to mention it every time. Claude reads this file via `get_git_context`
+before every time entry.
 
 ```
 # .ruddr-project
@@ -198,13 +211,13 @@ project_id = 550e8400-e29b-41d4-a716-446655440000
 project_name = NRC Easement Monitoring
 ```
 
-Mention it exists when prompting Claude: *"Use the .ruddr-project file to find the project."*
+When the file is present, Claude skips `list_projects` and uses the hint directly.
 
 ## Available tools
 
 | Tool | What it does |
 |---|---|
-| `get_git_context` | Returns repo URL, current branch, and open PR URL for use in notes |
+| `get_git_context` | Returns repo URL, branch, PR URL, and `.ruddr-project` hint for use in notes |
 | `get_my_member_id` | Returns your member ID (or lists all members if not configured) |
 | `list_projects` | Lists all active projects with IDs, clients, and required fields |
 | `list_project_roles` | Lists roles for a project (used to infer Frontend / Backend / etc.) |
